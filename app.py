@@ -1,10 +1,17 @@
 from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
 from config import Config
 from utils.sts import assume_role
 from services.aws_service import list_all_resources, get_resource_details
+from models.resource import db, Resource
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+db.init_app(app)
+
+with app.app_context():
+    db.create_all()
 
 @app.route('/assume_role', methods=['POST'])
 def assume_role_endpoint():
@@ -29,6 +36,19 @@ def list_resources_endpoint():
     try:
         creds = assume_role(account_id, role_name, external_id)
         resources = list_all_resources(creds)
+        for resource in resources:
+            existing_resource = Resource.query.filter_by(resource_id=resource['ResourceType']).first()
+            if existing_resource:
+                existing_resource.details = resource
+            else:
+                new_resource = Resource(
+                    resource_id=resource['ResourceType'],
+                    resource_type=resource['ResourceType'],
+                    region=resource['Region'],
+                    details=resource
+                )
+                db.session.add(new_resource)
+        db.session.commit()
         return jsonify({"resources": resources}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
